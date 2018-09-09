@@ -1,0 +1,10 @@
+./data/*
+./pretrained/*
+./.idea/*
+././*
+./../*
+./.idea/*
+./*.pyc
+./*.o
+./*.class
+./papers/*
