@@ -8,6 +8,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 
+import os
+
 
 class Net(nn.Module):
     def __init__(self):
@@ -26,6 +28,25 @@ class Net(nn.Module):
         x = F.dropout(x, training=self.training)
         x = self.fc2(x)
         return F.log_softmax(x, dim=1)
+
+    def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+        torch.save(state, filename)
+        if is_best:
+            shutil.copyfile(filename, 'model_best.pth.tar')
+
+    def load_checkpoint(self, args, optimizer, model):
+        if args.resume:
+            if os.path.isfile(args.resume):
+                print("=> loading checkpoint '{}'".format(args.resume))
+                checkpoint = torch.load(args.resume)
+                args.start_epoch = checkpoint['epoch']
+                best_prec1 = checkpoint['best_prec1']
+                model.load_state_dict(checkpoint['state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer'])
+                print("=> loaded checkpoint '{}' (epoch {})"
+                      .format(args.resume, checkpoint['epoch']))
+            else:
+                print("=> no checkpoint found at '{}'".format(args.resume))
 
 
 def train(args, model, device, train_loader, optimizer, epoch):
