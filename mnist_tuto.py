@@ -9,6 +9,7 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 
 import os
+import shutil
 
 
 class Net(nn.Module):
@@ -29,57 +30,69 @@ class Net(nn.Module):
         x = self.fc2(x)
         return F.log_softmax(x, dim=1)
 
-    def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+    def train_epoch(self, args, device, train_loader, optimizer, epoch):
+        self.train()
+        for batch_idx, (data, target) in enumerate(train_loader):
+            data, target = data.to(device), target.to(device)
+            optimizer.zero_grad()
+            output = self(data)
+            loss = F.nll_loss(output, target)
+            loss.backward()
+            optimizer.step()
+            if batch_idx % args.log_interval == 0:
+                print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                    epoch, batch_idx * len(data), len(train_loader.dataset),
+                           100. * batch_idx / len(train_loader), loss.item()), end='\r', flush=True)
+
+            if epoch % args.sv_interval == 0:
+                self.save_checkpoint({
+                    'epoch': epoch + 1,
+                    #'arch': args.arch,
+                    'state_dict': self.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                }, False)
+
+    def save_checkpoint(self, state, is_best, filename='./checkpoints/checkpoint.pth.tar'):
         torch.save(state, filename)
         if is_best:
             shutil.copyfile(filename, 'model_best.pth.tar')
 
-    def load_checkpoint(self, args, optimizer, model):
-        if args.resume:
-            if os.path.isfile(args.resume):
-                print("=> loading checkpoint '{}'".format(args.resume))
-                checkpoint = torch.load(args.resume)
-                args.start_epoch = checkpoint['epoch']
-                best_prec1 = checkpoint['best_prec1']
-                model.load_state_dict(checkpoint['state_dict'])
+    def load_checkpoint(self, ckpt_path, optimizer):
+        if ckpt_path:
+            if os.path.isfile(ckpt_path):
+                print("=> loading checkpoint '{}'".format(ckpt_path))
+                checkpoint = torch.load(ckpt_path)
+                #args.start_epoch = checkpoint['epoch']
+                self.load_state_dict(checkpoint['state_dict'])
                 optimizer.load_state_dict(checkpoint['optimizer'])
                 print("=> loaded checkpoint '{}' (epoch {})"
-                      .format(args.resume, checkpoint['epoch']))
+                      .format(ckpt_path, checkpoint['epoch']))
             else:
-                print("=> no checkpoint found at '{}'".format(args.resume))
+                print("=> no checkpoint found at '{}'".format(ckpt_path))
 
+    def test_epoch(self, device, test_loader):
+        self.eval()
+        test_loss = 0
+        correct = 0
+        with torch.no_grad():
+            for data, target in test_loader:
+                data, target = data.to(device), target.to(device)
+                output = self(data)
+                test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
+                pred = output.max(1, keepdim=True)[1]  # get the index of the max log-probability
+                correct += pred.eq(target.view_as(pred)).sum().item()
 
-def train(args, model, device, train_loader, optimizer, epoch):
-    model.train()
-    for batch_idx, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
-        optimizer.zero_grad()
-        output = model(data)
-        loss = F.nll_loss(output, target)
-        loss.backward()
-        optimizer.step()
-        if batch_idx % args.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                epoch, batch_idx * len(data), len(train_loader.dataset),
-                       100. * batch_idx / len(train_loader), loss.item()), end='\r', flush=True)
+        test_loss /= len(test_loader.dataset)
+        print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
+            test_loss, correct, len(test_loader.dataset),
+            100. * correct / len(test_loader.dataset)))
 
-
-def test(args, model, device, test_loader):
-    model.eval()
-    test_loss = 0
-    correct = 0
-    with torch.no_grad():
-        for data, target in test_loader:
-            data, target = data.to(device), target.to(device)
-            output = model(data)
-            test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
-            pred = output.max(1, keepdim=True)[1]  # get the index of the max log-probability
-            correct += pred.eq(target.view_as(pred)).sum().item()
-
-    test_loss /= len(test_loader.dataset)
-    print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-        test_loss, correct, len(test_loader.dataset),
-        100. * correct / len(test_loader.dataset)))
+    def training_phase(self, args, device, train_loader, test_loader, optimizer):
+        filepath = os.path.join(args.ckpt_path, 'checkpoint.pth.tar')
+        self.load_checkpoint(filepath, optimizer)
+        for epoch in range(1, args.epochs + 1):
+            self.train_epoch(args, device, train_loader, optimizer, epoch)
+            self.test_epoch(device, test_loader)
 
 
 def main():
@@ -101,6 +114,8 @@ def main():
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                         help='how many batches to wait before logging training status')
+    parser.add_argument('--sv-interval', type=int, default=5)
+    parser.add_argument('--ckpt-path', default='./checkpoints/')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -117,7 +132,7 @@ def main():
                        ])),
         batch_size=args.batch_size, shuffle=True, **kwargs)
     test_loader = torch.utils.data.DataLoader(
-        datasets.MNIST('../data', train=False, transform=transforms.Compose([
+        datasets.MNIST('./data', train=False, transform=transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.1307,), (0.3081,))
         ])),
@@ -126,9 +141,7 @@ def main():
     model = Net().to(device)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
 
-    for epoch in range(1, args.epochs + 1):
-        train(args, model, device, train_loader, optimizer, epoch)
-        test(args, model, device, test_loader)
+    model.training_phase(args, device, train_loader, test_loader, optimizer)
 
 
 if __name__ == '__main__':

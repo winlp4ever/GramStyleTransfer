@@ -8,3 +8,4 @@ pretrained/*
 *.o
 *.class
 papers/*
+checkpoints/*
