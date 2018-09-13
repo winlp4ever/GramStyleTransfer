@@ -9,3 +9,5 @@ pretrained/*
 *.class
 papers/*
 checkpoints/*
+runs/*
+test.py

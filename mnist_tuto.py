@@ -7,6 +7,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
+import glob
+
+from tensorboardX import SummaryWriter
 
 import os
 import shutil
@@ -20,6 +23,7 @@ class Net(nn.Module):
         self.conv2_drop = nn.Dropout2d()
         self.fc1 = nn.Linear(320, 50)
         self.fc2 = nn.Linear(50, 10)
+        self.writer = SummaryWriter()
 
     def forward(self, x):
         x = F.relu(F.max_pool2d(self.conv1(x), 2))
@@ -32,6 +36,8 @@ class Net(nn.Module):
 
     def train_epoch(self, args, device, train_loader, optimizer, epoch):
         self.train()
+        train_loss = 0
+        train_correct = 0
         for batch_idx, (data, target) in enumerate(train_loader):
             data, target = data.to(device), target.to(device)
             optimizer.zero_grad()
@@ -45,32 +51,54 @@ class Net(nn.Module):
                            100. * batch_idx / len(train_loader), loss.item()), end='\r', flush=True)
 
             if epoch % args.sv_interval == 0:
-                self.save_checkpoint({
-                    'epoch': epoch + 1,
-                    #'arch': args.arch,
-                    'state_dict': self.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                }, False)
+                self.save_checkpoint(args,
+                                     {
+                                         'epoch': epoch,
+                                         # 'arch': args.arch,
+                                         'state_dict': self.state_dict(),
+                                         'optimizer': optimizer.state_dict(),
+                                     }, epoch, False)
+            train_loss += loss.item()
+            pred = output.max(1, keepdim=True)[1]  # get the index of the max log-probability
+            train_correct += pred.eq(target.view_as(pred)).sum().item()
 
-    def save_checkpoint(self, state, is_best, filename='./checkpoints/checkpoint.pth.tar'):
+        train_loss /= len(train_loader.dataset)
+        train_correct = 100. * train_correct / len(train_loader.dataset)
+        self.writer.add_scalar('train_loss', train_loss, global_step=epoch)
+        self.writer.add_scalar('train_correct', train_correct, global_step=epoch)
+
+    def save_checkpoint(self, args, state, epoch, is_best):
+        filename = os.path.join(args.ckpt_path, 'checkpoint-{}.pth.tar'.format(epoch))
         torch.save(state, filename)
         if is_best:
-            shutil.copyfile(filename, 'model_best.pth.tar')
+            shutil.copyfile(filename, os.path.join(args.ckpt_path, 'model_best.pth.tar'))
 
     def load_checkpoint(self, ckpt_path, optimizer):
-        if ckpt_path:
-            if os.path.isfile(ckpt_path):
-                print("=> loading checkpoint '{}'".format(ckpt_path))
-                checkpoint = torch.load(ckpt_path)
-                #args.start_epoch = checkpoint['epoch']
-                self.load_state_dict(checkpoint['state_dict'])
-                optimizer.load_state_dict(checkpoint['optimizer'])
-                print("=> loaded checkpoint '{}' (epoch {})"
-                      .format(ckpt_path, checkpoint['epoch']))
-            else:
-                print("=> no checkpoint found at '{}'".format(ckpt_path))
+        max_ep = 0
+        path = ''
+        for fp in glob.glob(os.path.join(ckpt_path, '*')):
+            fn = os.path.basename(fp)
+            fn_ = fn.replace('-', ' ')
+            fn_ = fn_.replace('.', ' ')
+            epoch = int(fn_.split()[1])
+            if epoch > max_ep:
+                path = fp
+                max_ep = epoch
 
-    def test_epoch(self, device, test_loader):
+        if os.path.isfile(path):
+            print("=> loading checkpoint '{}'".format(path))
+            checkpoint = torch.load(path)
+            # args.start_epoch = checkpoint['epoch']
+            self.load_state_dict(checkpoint['state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            print("=> loaded checkpoint '{}' (epoch {})"
+                  .format(path, checkpoint['epoch']))
+            return checkpoint['epoch']
+        else:
+            print("=> no checkpoint found at '{}'".format(ckpt_path))
+            return 0
+
+    def test_epoch(self, device, test_loader, epoch=None):
         self.eval()
         test_loss = 0
         correct = 0
@@ -86,13 +114,18 @@ class Net(nn.Module):
         print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
             test_loss, correct, len(test_loader.dataset),
             100. * correct / len(test_loader.dataset)))
+        if epoch is not None:
+            self.writer.add_scalar('test_loss', test_loss, global_step=epoch)
+            self.writer.add_scalar('test_correct', correct * 100. / len(test_loader), global_step=epoch)
 
     def training_phase(self, args, device, train_loader, test_loader, optimizer):
-        filepath = os.path.join(args.ckpt_path, 'checkpoint.pth.tar')
-        self.load_checkpoint(filepath, optimizer)
+        if args.resume:
+            last_epoch = self.load_checkpoint(args.ckpt_path, optimizer)
+        else:
+            last_epoch = 0
         for epoch in range(1, args.epochs + 1):
-            self.train_epoch(args, device, train_loader, optimizer, epoch)
-            self.test_epoch(device, test_loader)
+            self.train_epoch(args, device, train_loader, optimizer, last_epoch + epoch)
+            self.test_epoch(device, test_loader, last_epoch + epoch)
 
 
 def main():
@@ -114,8 +147,9 @@ def main():
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                         help='how many batches to wait before logging training status')
-    parser.add_argument('--sv-interval', type=int, default=5)
-    parser.add_argument('--ckpt-path', default='./checkpoints/')
+    parser.add_argument('--sv-interval', type=int, default=10)
+    parser.add_argument('--ckpt-path', '-c', default='./checkpoints/', nargs='?')
+    parser.add_argument('--resume', type=bool, default=False, const=True, nargs='?')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
