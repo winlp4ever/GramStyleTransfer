@@ -1,4 +1,5 @@
 from model import vgg19
+from model import VGG
 
 import torch
 import torchvision
@@ -32,3 +33,7 @@ class framework(nn.Module):
 
     def forward(self):
         x = torch.randn(5, 5)
+
+class vgg_extractor(VGG):
+    def __init__(self, features, num_classes):
+        super(self, vgg_extractor).__init__()
