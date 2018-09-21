@@ -44,6 +44,10 @@ class VGG_Extractor(nn.Module):
             chosen_features.append(self.features[indx:indx_](x))
         return chosen_features
 
+    def synthesis_via_optim(self):
+
+
+
 
 cfg = {
     'A': [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
