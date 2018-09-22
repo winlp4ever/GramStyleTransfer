@@ -64,7 +64,7 @@ def mseloss(input, target):
     return loss
 
 
-def synthesize(model, device, im, epochs, lr, momentum):
+def synthesize(model, device, im, epochs, lr):
     for param in model.parameters():
         param.requires_grad = False
 
@@ -73,23 +73,25 @@ def synthesize(model, device, im, epochs, lr, momentum):
     feats = model.forward(torch.from_numpy(im).float().to(device))
     feats = [u.detach() for u in feats]
 
-    optimizer = optim.SGD([x], lr=lr, momentum=momentum)
+    #optimizer = optim.SGD([x], lr=lr, momentum=momentum)
+    optimizer = optim.LBFGS([x], max_iter=100, lr=lr)
     print('set up finished!')
-    for epoch in range(epochs):
-        optimizer.zero_grad()
-        output = model.forward(x)
-        loss = mseloss(output, feats)
-        loss.backward()
-        optimizer.step()
+    for epoch in range(1, epochs + 1):
+        def closure():
+            optimizer.zero_grad()
+            output = model.forward(x)
+            loss = mseloss(output, feats)
+            loss.backward()
+            return loss
+        l = optimizer.step(closure)
+
+        print('epoch:{}--loss:{}'.format(epoch, l), end='\r', flush=True)
         if epoch % 100 == 0:
-            print('epoch:{}--loss:{}'.format(epoch, loss.item()))
-            #cv2.imshow('synthesized img', x.detach().numpy())
-            #cv2.waitKey(0)
-            #cv2.destroyAllWindows()
-    resynth_img = np.transpose(x.cpu().detach().numpy(), (1, 2, 0))
-    cv2.imshow('resynthesized_img', resynth_img * 255)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+            resynth_img = np.transpose(x.cpu().detach().numpy(), (1, 2, 0))
+            cv2.imshow('synthesized img', resynth_img * 255)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+
 
 if __name__ == '__main__':
     device = torch.device("cuda")
@@ -103,11 +105,8 @@ if __name__ == '__main__':
     resized_img = resized_img / 255
     print('shape {}'.format(resized_img.shape))
     print(resized_img)
-    #cv2.imshow('crop image', resized_img)
-    #cv2.waitKey(0)
-    #cv2.destroyAllWindows()
-    #img = np.ones((3, 224, 224), dtype=float)
-    synthesize(E, device, resized_img, 10000, 1e-3, 0.5)
+
+    synthesize(E, device, resized_img, 100, 0.8, 0.5)
 
 
 
