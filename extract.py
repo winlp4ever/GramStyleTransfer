@@ -106,7 +106,7 @@ if __name__ == '__main__':
     print('shape {}'.format(resized_img.shape))
     print(resized_img)
 
-    synthesize(E, device, resized_img, 100, 0.8, 0.5)
+    synthesize(E, device, resized_img, 100, 0.8)
 
 
 
