@@ -99,7 +99,7 @@ def style_loss(features):
         f_ = f.view(f.shape[1], -1)
         n = f_.shape[0]
         m = f_.shape[1]
-        gram_f = torch.matmul(f_, torch.transpose(f_, 0, 1)) / (4 * n ** 2 * m ** 2)
+        gram_f = torch.matmul(f_, torch.transpose(f_, 0, 1)) / (2 * n * m)
         ls_grams.append(gram_f)
     return ls_grams
 
@@ -138,7 +138,7 @@ def synthesize(model, device, im_c, im_s, epochs, lr, im_size=224, lambd=1.0):
             l_c = mseloss(output, feats_cnt)
             l_s = lambd * mseloss(out_grams, grams, size_average=False)
             loss = l_c + l_s
-            print('epoch:{0}/{1}--loss: total {2:.2f} content {3:.2f} style {4:.2f} '.
+            print('epoch:{0}/{1}--loss: total {2:6.2f} content {3:6.2f} style {4:6.2f} '.
                   format(epoch, epochs, loss, l_c, l_s), end='\r', flush=True)
             loss.backward()
             return loss
@@ -150,12 +150,14 @@ def synthesize(model, device, im_c, im_s, epochs, lr, im_size=224, lambd=1.0):
             out_img = postprocess(out_t)
             out_img.show()
 
+    print('\nfinished!')
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=10)
-    parser.add_argument('--size', type=int, nargs='*', default=224)
-    parser.add_argument('--lambd', '-l', type=float, default=1e10)
+    parser.add_argument('--size', type=int, nargs='*', default=(224,))
+    parser.add_argument('--lambd', '-l', type=float, default=1e-2)
 
     args = parser.parse_args()
     size = args.size
