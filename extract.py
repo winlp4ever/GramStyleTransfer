@@ -9,6 +9,7 @@ import numpy as np
 from PIL import Image
 import argparse
 import cv2
+import os
 
 from model import VGG
 from model import make_layers
@@ -19,18 +20,18 @@ from model import model_urls
 class vgg_extractor(VGG):
     def __init__(self, features, num_classes=1000, init_weights=True):
         super(vgg_extractor, self).__init__(features, num_classes, init_weights)
-        self.ls_layers = None
+        self.layer_ids = None
 
-    def set_ls_layers(self, ls_layers):
-        self.ls_layers = ls_layers
+    def set_ls_layers(self, layer_ids):
+        self.layer_ids = layer_ids
 
     def forward(self, x):
         x = torch.unsqueeze(x, 0)
-        assert self.ls_layers is not None, 'you have to define ls_layers first!'
+        assert self.layer_ids is not None, 'you have to define ls_layers first!'
         indx = 0
         curr_feat = x
         chosen_features = []
-        for indx_ in self.ls_layers:
+        for indx_ in self.layer_ids:
             curr_feat = self.features[indx:indx_](curr_feat)
             chosen_features.append(curr_feat)
             indx = indx_
@@ -93,18 +94,18 @@ def mseloss(input, target, size_average=True):
     return loss
 
 
-def style_loss(features):
-    ls_grams = []
+def compute_grams(features):
+    grams = []
     for f in features:
         f_ = f.view(f.shape[1], -1)
         n = f_.shape[0]
         m = f_.shape[1]
         gram_f = torch.matmul(f_, torch.transpose(f_, 0, 1)) / (2 * n * m)
-        ls_grams.append(gram_f)
-    return ls_grams
+        grams.append(gram_f)
+    return grams
 
 
-def synthesize(model, device, im_c, im_s, epochs, lr, im_size=224, lambd=1.0):
+def synthesize(model, device, im_c, im_s, epochs, lr, im_size=224, lambd=1.0, savename=None):
     for param in model.parameters():
         param.requires_grad = False
 
@@ -124,7 +125,7 @@ def synthesize(model, device, im_c, im_s, epochs, lr, im_size=224, lambd=1.0):
 
     # style features
     feats_stl = model.forward(im_s.float().to(device))
-    grams = style_loss(feats_stl)
+    grams = compute_grams(feats_stl)
     grams = [g.detach() for g in grams]
 
     # optimizer = optim.SGD([x], lr=lr, momentum=momentum)
@@ -134,11 +135,11 @@ def synthesize(model, device, im_c, im_s, epochs, lr, im_size=224, lambd=1.0):
         def closure():
             optimizer.zero_grad()
             output = model.forward(x)
-            out_grams = style_loss(output)
+            out_grams = compute_grams(output)
             l_c = mseloss(output, feats_cnt)
-            l_s = lambd * mseloss(out_grams, grams, size_average=False)
-            loss = l_c + l_s
-            print('epoch:{0}/{1}--loss: total {2:6.2f} content {3:6.2f} style {4:6.2f} '.
+            l_s = mseloss(out_grams, grams, size_average=False)
+            loss = l_c + lambd * l_s
+            print('epoch:{0:2}/{1:2}--loss: total {2:6.2f} content {3:6.2f} style {4:6.2f} '.
                   format(epoch, epochs, loss, l_c, l_s), end='\r', flush=True)
             loss.backward()
             return loss
@@ -150,11 +151,24 @@ def synthesize(model, device, im_c, im_s, epochs, lr, im_size=224, lambd=1.0):
             out_img = postprocess(out_t)
             out_img.show()
 
+    answer = str(input('\ndo you want to save the result? [y/n]\n'))
+    t = 1
+    while answer != 'y' and answer != 'n':
+        if t == 3:
+            answer = 'n'
+            break
+        answer = str(input("invalid answer, type 'y'(yes) or 'n'(no):\n"))
+        t += 1
+    if answer == 'y':
+        assert savename is not None, 'savename must not be None!'
+        out_img.save('./results/img.jpg',"JPEG", quality=100, optimize=True, progressive=True)
     print('\nfinished!')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--cont-file', '-c', default='cnt')
+    parser.add_argument('--style-file', '-s', default='stl')
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--size', type=int, nargs='*', default=(224,))
     parser.add_argument('--lambd', '-l', type=float, default=1e-2)
@@ -163,20 +177,24 @@ if __name__ == '__main__':
     size = args.size
     if len(size) < 2:
         size = size[0]
+
+    im_dir = './images'
+    im_c = preprocess(os.path.join(im_dir, args.cont_file + '.jpg'), im_size=size)
+    im_s = preprocess(os.path.join(im_dir, args.style_file + '.jpg'), im_size=size)
+
+    save_dir = './results'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    savepath = os.path.join(save_dir, '{}2{}_lambd{}_epochs{}'.
+                          format(args.cont_file, args.style_file, args.lambd, args.epochs))
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     E = vgg19_bn_extractor()
-    # print(E.features)
     E = E.to(device)
     # ls_layers = (2, 9, 16, 29, 42)
     # ls_layers = (0, 7, 14, 27, 40)
     ls_layers = (1, 6, 11, 20, 29)
     E.set_ls_layers(ls_layers)
-    fn_c = './images/cnt.jpg'
-    img_c = preprocess(fn_c, im_size=size)
-    print('shape {}'.format(img_c.shape))
-    # print(resized_img)
-    fn_s = './images/stl.jpg'
-    img_s = preprocess(fn_s, im_size=size)
 
-
-    synthesize(E, device, img_c, img_s, args.epochs, 0.8, size, lambd=args.lambd)
+    synthesize(E, device, im_c, im_s, args.epochs, 0.8, size, lambd=args.lambd, savename=savepath)
