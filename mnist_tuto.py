@@ -1,4 +1,4 @@
-# this code is copied from pytorch example directory with some slight modifies and is not intended to be shown to public. If you're looking at it, so sorry. I'm learning
+# this code is copied from pytorch example directory with some modifies and is not intended to be shown to public. If you're looking at it, so sorry. I'm learning
 # deep learning and because I work on several computers at the same time, upload to my git repository is the best way to keep all works syncing.
 from __future__ import print_function
 import argparse
