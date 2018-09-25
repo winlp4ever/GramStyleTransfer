@@ -161,7 +161,7 @@ def synthesize(model, device, im_c, im_s, epochs, lr, im_size=224, lambd=1.0, sa
         t += 1
     if answer == 'y':
         assert savename is not None, 'savename must not be None!'
-        out_img.save('./results/img.jpg',"JPEG", quality=100, optimize=True, progressive=True)
+        out_img.save(savename + '.jpg',"JPEG", quality=100, optimize=True, progressive=True)
     print('\nfinished!')
 
 
@@ -172,6 +172,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--size', type=int, nargs='*', default=(224,))
     parser.add_argument('--lambd', '-l', type=float, default=1e-2)
+    parser.add_argument('--learning-rate', '-r', type=float, default=0.8)
 
     args = parser.parse_args()
     size = args.size
@@ -197,4 +198,4 @@ if __name__ == '__main__':
     ls_layers = (1, 6, 11, 20, 29)
     E.set_ls_layers(ls_layers)
 
-    synthesize(E, device, im_c, im_s, args.epochs, 0.8, size, lambd=args.lambd, savename=savepath)
+    synthesize(E, device, im_c, im_s, args.epochs, args.learning_rate, size, lambd=args.lambd, savename=savepath)

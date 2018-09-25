@@ -12,4 +12,4 @@ checkpoints/*
 runs/*
 test.py
 images/*
-results/*
+# results/*
