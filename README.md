@@ -2,7 +2,7 @@
 
 _This is a personal mini-project. I tried to reimplement the Style Transfer methods described in the 
 Gatys' [paper](https://arxiv.org/pdf/1508.06576.pdf) and Adobe's [paper](https://arxiv.org/pdf/1705.08086.pdf).
-The code is written in Pytorch_
+The code is written with Pytorch_
 
 ##### Image Preprocessing phase for VGG Nets
 Typically for the pretrained `vgg19` (without `batch_normalization`) model of Pytorch, before passing to
