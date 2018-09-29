@@ -148,7 +148,7 @@ def main():
     parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                         help='how many batches to wait before logging training status')
     parser.add_argument('--sv-interval', type=int, default=10)
-    parser.add_argument('--ckpt-path', '-c', default='./checkpoints/', nargs='?')
+    parser.add_argument('--ckpt-path', '-c', default='./mnist/checkpoints/', nargs='?')
     parser.add_argument('--resume', type=bool, default=False, const=True, nargs='?')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()

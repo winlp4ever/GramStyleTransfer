@@ -9,6 +9,10 @@ from model import VGG
 from model import make_layers
 import torch.utils.model_zoo as model_zoo
 from model import model_urls
+import os
+import glob
+from tensorboardX import SummaryWriter
+
 
 class unitransform(nn.Module):
     def __init__(self, cfg, dspl_cfg):
@@ -16,11 +20,14 @@ class unitransform(nn.Module):
         self.features = make_layers(cfg, batch_norm=False)
         self.dspl = make_reversed_layers(dspl_cfg, batch_norm=False)
         self._init_weights()
+        self.writer = SummaryWriter()
 
-    def forward(self, x):
+    def forward(self, x, decode=False):
         embed = self.features(x)
-        output = self.dspl(embed)
-        return embed, output
+        if decode:
+            output = self.dspl(embed)
+            return embed, output
+        return embed
 
     def _init_weights(self):
         for m in self.modules():
@@ -39,10 +46,10 @@ dspl_cfg = {'E': [512, 'U', 512, 512, 512, 256, 'U', 256, 256, 256, 128, 'U', 12
 
 def make_reversed_layers(cfg, batch_norm=False):
     layers = []
-    in_channels = 512 # to be changed
+    in_channels = 512  # to be changed
     for v in cfg:
-        if v == 'M':
-            layers.append(nn.Upsample(size=2, mode='nearest'))
+        if v == 'U':
+            layers.append(nn.Upsample(scale_factor=2, mode='nearest'))
         else:
             dspl_conv = nn.ConvTranspose2d(in_channels, v, kernel_size=3, padding=1)
             if batch_norm:
@@ -66,29 +73,94 @@ def vgg19_autoencoder():
     return model
 
 
-def train(model, device, train_loader, rl, lambd):
+def save_checkpoint(args, state, epoch):
+    filename = os.path.join(args.ckpt_path, 'checkpoint-{}.pth.tar'.format(epoch))
+    torch.save(state, filename)
+
+
+def load_checkpoint(model, ckpt_path, optimizer):
+    max_ep = 0
+    path = ''
+    for fp in glob.glob(os.path.join(ckpt_path, '*')):
+        fn = os.path.basename(fp)
+        fn_ = fn.replace('-', ' ')
+        fn_ = fn_.replace('.', ' ')
+        epoch = int(fn_.split()[1])
+        if epoch > max_ep:
+            path = fp
+            max_ep = epoch
+
+    if os.path.isfile(path):
+        print("=> loading checkpoint '{}'".format(path))
+        checkpoint = torch.load(path)
+        # args.start_epoch = checkpoint['epoch']
+        model.load_state_dict(checkpoint['state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        print("=> loaded checkpoint '{}' (epoch {})"
+              .format(path, checkpoint['epoch']))
+        return checkpoint['epoch']
+    else:
+        print("=> no checkpoint found at '{}'".format(ckpt_path))
+        return 0
+
+
+def training(model, device, train_loader, optimizer, lambd, epoch):
     model.train()
     for param in model.features.parameters():
-        param.requires_grad=False
+        param.requires_grad = False
 
-    optimizer = optim.Adam(model.dspl.parameters(), rl)
-
-    for batch_idx, data in enumerate(train_loader):
+    train_loss = 0
+    for batch_idx, (data, _) in enumerate(train_loader):
         x = data.to(device)
         optimizer.zero_grad()
-        embed, output = model.forward(x)
-        output_embed, _ = model.forward(output)
+        embed, output = model.forward(x, decode=True)
+        output_embed = model.forward(output)
         loss = F.mse_loss(input=output, target=x) + lambd * F.mse_loss(input=output_embed, target=embed)
         loss.backward()
         optimizer.step()
+        train_loss += loss.item() / len(train_loader.dataset)
+        print('Train epoch {0} -- loss {1:.6f} [{2:.2f}%]'.
+              format(epoch, train_loss, 100. * batch_idx / len(train_loader)),
+              end='\r', flush=True)
+
+    model.writer.add_scalar('train_loss', train_loss, global_step=epoch)
+
+
+def testing(model, device, test_loader, epoch):
+    model.eval()
+    print('\n')
+    test_loss = 0
+    for batch_idx, (data, _) in enumerate(test_loader):
+        x = data.to(device)
+        _, output = model.forward(x)
+        loss = F.mse_loss(input=output, target=x)
+        test_loss += loss / len(test_loader.dataset)
+        print('Eval: test loss {0:.6f} [{1:.2f}%]'.
+              format(test_loss, 100. * batch_idx / len(train_loader)),
+              end='\r', flush=True)
+    print('\n')
+
+    model.writer.add_scalar('test_loss', test_loss, global_step=epoch)
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--traindir', default='../datasets/coco/train')
+    parser.add_argument('--testdir', default='../datasets/coco/test')
+    parser.add_argument('--batch-size', type=int, default=32)
+    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--lambd', type=float, default=1.0)
+    parser.add_argument('--ckpt-path', default='./uni/checkpoints')
+    parser.add_argument('--resume', type=bool, default=True)
+
+    args = parser.parse_args()
+
     use_cuda = True
-    traindir = '../datasets/coco'
+
     height = width = 224
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
-    batch_size = 32
 
     prep = transforms.Compose([transforms.Resize((height, width)),
                                transforms.ToTensor(),
@@ -98,13 +170,38 @@ if __name__ == '__main__':
                                transforms.Lambda(lambda x: x.mul_(255)),
                                ])
 
-    train_dataset = datasets.ImageFolder(
-        traindir,
-        prep
-    )
+    # load datasets
+    train_dataset, test_dataset = map(lambda dir: datasets.ImageFolder(
+        dir, prep
+    ), [args.traindir, args.testdir])
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
-        batch_size=batch_size, shuffle=True, **kwargs
+        batch_size=args.batch_size, shuffle=True, **kwargs
     )
 
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset,
+        batch_size=args.batch_size, shuffle=True, **kwargs
+    )
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = vgg19_autoencoder().to(device)
+
+    optimizer = optim.Adam(model.dspl.parameters(), args.lr)
+
+    if args.resume:
+        last_epoch = load_checkpoint(model, args.ckpt_path, optimizer)
+    else:
+        last_epoch = 0
+
+    for epoch in range(1, args.epochs + 1):
+        training(model, device, train_loader, optimizer, lambd=args.lambd, epoch=epoch + last_epoch)
+        save_checkpoint(args,
+                    {
+                        'epoch': last_epoch + epoch,
+                        # 'arch': args.arch,
+                        'state_dict': model.state_dict(),
+                        'optimizer': optimizer.state_dict(),
+                    }, epoch)
+        testing(model, device, test_loader, epoch)

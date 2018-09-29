@@ -13,3 +13,5 @@ runs/*
 test.py
 images/*
 # results/*
+mnist/*
+uni/*
