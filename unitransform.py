@@ -12,6 +12,8 @@ from model import model_urls
 import os
 import glob
 from tensorboardX import SummaryWriter
+import time
+import utils
 
 
 class unitransform(nn.Module):
@@ -96,6 +98,7 @@ def load_checkpoint(model, ckpt_path, optimizer):
         # args.start_epoch = checkpoint['epoch']
         model.load_state_dict(checkpoint['state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer'])
+        #scheduler.load_state_dict(checkpoint['scheduler'])
         print("=> loaded checkpoint '{}' (epoch {})"
               .format(path, checkpoint['epoch']))
         return checkpoint['epoch']
@@ -110,6 +113,7 @@ def training(model, device, train_loader, optimizer, lambd, epoch):
         param.requires_grad = False
 
     train_loss = 0
+    begin = time.time()
     for batch_idx, (data, _) in enumerate(train_loader):
         x = data.to(device)
         optimizer.zero_grad()
@@ -119,9 +123,10 @@ def training(model, device, train_loader, optimizer, lambd, epoch):
         loss.backward()
         optimizer.step()
         train_loss += loss.item() / len(train_loader.dataset)
-        print('Train epoch {0} -- loss {1:.6f} [{2:.2f}%]'.
-              format(epoch, train_loss, 100. * batch_idx / len(train_loader)),
-              end='\r', flush=True)
+        if batch_idx % 5 == 0:
+            print('Train epoch {0} -- loss {1:.6f} [{2:.2f}%] in {3}'.
+                  format(epoch, train_loss, 100. * batch_idx / len(train_loader), utils.sec2time(time.time() - begin)),
+                  end='\r', flush=True)
 
     model.writer.add_scalar('train_loss', train_loss, global_step=epoch)
 
@@ -132,11 +137,11 @@ def testing(model, device, test_loader, epoch):
     test_loss = 0
     for batch_idx, (data, _) in enumerate(test_loader):
         x = data.to(device)
-        _, output = model.forward(x)
+        _, output = model.forward(x, decode=True)
         loss = F.mse_loss(input=output, target=x)
-        test_loss += loss / len(test_loader.dataset)
+        test_loss += loss.item() / len(test_loader.dataset)
         print('Eval: test loss {0:.6f} [{1:.2f}%]'.
-              format(test_loss, 100. * batch_idx / len(train_loader)),
+              format(test_loss, 100. * batch_idx / len(test_loader)),
               end='\r', flush=True)
     print('\n')
 
@@ -148,12 +153,13 @@ if __name__ == '__main__':
 
     parser.add_argument('--traindir', default='../datasets/coco/train')
     parser.add_argument('--testdir', default='../datasets/coco/test')
-    parser.add_argument('--batch-size', type=int, default=32)
+    parser.add_argument('--batch-size', type=int, default=8)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--lambd', type=float, default=1.0)
     parser.add_argument('--ckpt-path', default='./uni/checkpoints')
-    parser.add_argument('--resume', type=bool, default=True)
+    parser.add_argument('--resume', type=bool, default=False, const=True, nargs='?')
+    parser.add_argument('--gamma', type=float, default=5e-5)
 
     args = parser.parse_args()
 
@@ -188,7 +194,12 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = vgg19_autoencoder().to(device)
 
-    optimizer = optim.Adam(model.dspl.parameters(), args.lr)
+    optimizer = optim.Adam(model.dspl.parameters(), lr=args.lr)
+    def lr_updater(optim_, ep_):
+        for param_group in optim_.param_groups:
+            param_group['lr'] *= 1 / (1 + args.gamma * ep_)
+
+    #scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=[lr_updater,])
 
     if args.resume:
         last_epoch = load_checkpoint(model, args.ckpt_path, optimizer)
@@ -196,12 +207,16 @@ if __name__ == '__main__':
         last_epoch = 0
 
     for epoch in range(1, args.epochs + 1):
+        print('\ncurr learning rate: {0:.6f}'.format(optimizer.param_groups[0]['lr']))
         training(model, device, train_loader, optimizer, lambd=args.lambd, epoch=epoch + last_epoch)
         save_checkpoint(args,
-                    {
-                        'epoch': last_epoch + epoch,
-                        # 'arch': args.arch,
-                        'state_dict': model.state_dict(),
-                        'optimizer': optimizer.state_dict(),
-                    }, epoch)
+                        {
+                            'epoch': last_epoch + epoch,
+                            # 'arch': args.arch,
+                            'state_dict': model.state_dict(),
+                            'optimizer': optimizer.state_dict(),
+                            #'scheduler': scheduler.state_dict()
+                        }, epoch)
+        lr_updater(optimizer, epoch + last_epoch)
+        #scheduler.step()
         testing(model, device, test_loader, epoch)
