@@ -5,8 +5,7 @@ from torchvision import datasets, transforms
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from model import VGG
-from model import make_layers
+from extract import make_layers_avg
 import torch.utils.model_zoo as model_zoo
 from model import model_urls
 import os
@@ -15,19 +14,21 @@ from tensorboardX import SummaryWriter
 import time
 import utils
 
+levels = [1, 6, 11, 20, 29]
+d_levels = [40, 33, 26, 13, 0]
 
 class unitransform(nn.Module):
     def __init__(self, cfg, dspl_cfg):
         super(unitransform, self).__init__()
-        self.features = make_layers(cfg, batch_norm=False)
+        self.features = make_layers_avg(cfg, batch_norm=False)
         self.dspl = make_reversed_layers(dspl_cfg, batch_norm=False)
         self._init_weights()
         self.writer = SummaryWriter()
 
-    def forward(self, x, decode=False):
-        embed = self.features(x)
+    def forward(self, x, decode=False, level=5):
+        embed = self.features[:levels[level] + 1](x)
         if decode:
-            output = self.dspl(embed)
+            output = self.dspl[d_levels[level]:](embed)
             return embed, output
         return embed
 
@@ -53,11 +54,12 @@ def make_reversed_layers(cfg, batch_norm=False):
         if v == 'U':
             layers.append(nn.Upsample(scale_factor=2, mode='nearest'))
         else:
-            dspl_conv = nn.ConvTranspose2d(in_channels, v, kernel_size=3, padding=1)
+            #dspl_conv = nn.ConvTranspose2d(in_channels, v, kernel_size=3, padding=0)
+            dspl_conv = nn.Conv2d(in_channels, v, kernel_size=3, padding=0)
             if batch_norm:
-                layers += [dspl_conv, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
+                layers += [nn.ReflectionPad2d(padding=1), dspl_conv, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
             else:
-                layers += [dspl_conv, nn.ReLU(inplace=True)]
+                layers += [nn.ReflectionPad2d(padding=1), dspl_conv, nn.ReLU(inplace=True)]
             in_channels = v
     return nn.Sequential(*layers)
 
@@ -75,12 +77,15 @@ def vgg19_autoencoder():
     return model
 
 
-def save_checkpoint(args, state, epoch):
-    filename = os.path.join(args.ckpt_path, 'checkpoint-{}.pth.tar'.format(epoch))
+def save_checkpoint(args, state, epoch, level):
+    path = os.path.join(args.ckpt_path, str(level))
+    if not os.path.exists(path):
+        os.makedirs(path)
+    filename = os.path.join(path, 'checkpoint-{}.pth.tar'.format(epoch))
     torch.save(state, filename)
 
 
-def load_checkpoint(model, ckpt_path, optimizer):
+def load_checkpoint(model, ckpt_path, optimizer=None):
     max_ep = 0
     path = ''
     for fp in glob.glob(os.path.join(ckpt_path, '*')):
@@ -97,7 +102,8 @@ def load_checkpoint(model, ckpt_path, optimizer):
         checkpoint = torch.load(path)
         # args.start_epoch = checkpoint['epoch']
         model.load_state_dict(checkpoint['state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
+        if optimizer is not None:
+            optimizer.load_state_dict(checkpoint['optimizer'])
         #scheduler.load_state_dict(checkpoint['scheduler'])
         print("=> loaded checkpoint '{}' (epoch {})"
               .format(path, checkpoint['epoch']))
@@ -107,7 +113,7 @@ def load_checkpoint(model, ckpt_path, optimizer):
         return 0
 
 
-def training(model, device, train_loader, optimizer, lambd, epoch):
+def training(model, device, train_loader, optimizer, lambd, epoch, level):
     model.train()
     for param in model.features.parameters():
         param.requires_grad = False
@@ -117,8 +123,8 @@ def training(model, device, train_loader, optimizer, lambd, epoch):
     for batch_idx, (data, _) in enumerate(train_loader):
         x = data.to(device)
         optimizer.zero_grad()
-        embed, output = model.forward(x, decode=True)
-        output_embed = model.forward(output)
+        embed, output = model.forward(x, decode=True, level=level)
+        output_embed = model.forward(output, level=level)
         loss = F.mse_loss(input=output, target=x) + lambd * F.mse_loss(input=output_embed, target=embed)
         loss.backward()
         optimizer.step()
@@ -131,13 +137,13 @@ def training(model, device, train_loader, optimizer, lambd, epoch):
     model.writer.add_scalar('train_loss', train_loss, global_step=epoch)
 
 
-def testing(model, device, test_loader, epoch):
+def testing(model, device, test_loader, epoch, level):
     model.eval()
     print('\n')
     test_loss = 0
     for batch_idx, (data, _) in enumerate(test_loader):
         x = data.to(device)
-        _, output = model.forward(x, decode=True)
+        _, output = model.forward(x, decode=True, level=level)
         loss = F.mse_loss(input=output, target=x)
         test_loss += loss.item() / len(test_loader.dataset)
         print('Eval: test loss {0:.6f} [{1:.2f}%]'.
@@ -160,6 +166,8 @@ if __name__ == '__main__':
     parser.add_argument('--ckpt-path', default='./uni/checkpoints')
     parser.add_argument('--resume', type=bool, default=False, const=True, nargs='?')
     parser.add_argument('--gamma', type=float, default=5e-5)
+    parser.add_argument('--level', type=int, default=4)
+    parser.add_argument('--ckpt-level', type=int, default=4)
 
     args = parser.parse_args()
 
@@ -201,22 +209,22 @@ if __name__ == '__main__':
 
     #scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=[lr_updater,])
 
+    ckpt_path = os.path.join(args.ckpt_path, str(args.ckpt_level))
     if args.resume:
-        last_epoch = load_checkpoint(model, args.ckpt_path, optimizer)
+        last_epoch = load_checkpoint(model, ckpt_path, optimizer)
+        if args.ckpt_level < args.level:
+            last_epoch = 0
     else:
         last_epoch = 0
 
     for epoch in range(1, args.epochs + 1):
         print('\ncurr learning rate: {0:.6f}'.format(optimizer.param_groups[0]['lr']))
-        training(model, device, train_loader, optimizer, lambd=args.lambd, epoch=epoch + last_epoch)
+        training(model, device, train_loader, optimizer, lambd=args.lambd, epoch=epoch + last_epoch, level=args.level)
         save_checkpoint(args,
                         {
                             'epoch': last_epoch + epoch,
-                            # 'arch': args.arch,
                             'state_dict': model.state_dict(),
                             'optimizer': optimizer.state_dict(),
-                            #'scheduler': scheduler.state_dict()
-                        }, epoch)
+                        }, epoch, args.level)
         lr_updater(optimizer, epoch + last_epoch)
-        #scheduler.step()
-        testing(model, device, test_loader, epoch)
+        testing(model, device, test_loader, epoch, args.level)

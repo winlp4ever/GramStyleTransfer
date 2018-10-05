@@ -13,3 +13,9 @@ the network, the image should be:
 * the matrix should then be upscaled by a factor `255.0`
 
 The _postprocess_ should be a complete inverse of the preprocess above.
+
+##### Original Gatys' method
+
+```bash
+python extract.py -c landscape -s stl --size <height> <width> --lambd 0
+```

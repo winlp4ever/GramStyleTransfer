@@ -8,11 +8,9 @@ import torch.utils.model_zoo as model_zoo
 import numpy as np
 from PIL import Image
 import argparse
-import cv2
 import os
 
 from model import VGG
-from model import make_layers
 from model import cfg
 from model import model_urls
 
@@ -71,10 +69,26 @@ def postprocess(tensor):
     return img
 
 
+def make_layers_avg(cfg, batch_norm=False):
+    layers = []
+    in_channels = 3
+    for v in cfg:
+        if v == 'M':
+            layers += [nn.AvgPool2d(kernel_size=2, stride=2)]
+        else:
+            conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
+            if batch_norm:
+                layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
+            else:
+                layers += [conv2d, nn.ReLU(inplace=True)]
+            in_channels = v
+    return nn.Sequential(*layers)
+
+
 def vgg19_bn_extractor(**kwargs):
     kwargs['init_weights'] = False
 
-    model = vgg_extractor(make_layers(cfg['E'], batch_norm=False), **kwargs)
+    model = vgg_extractor(make_layers_avg(cfg['E'], batch_norm=False), **kwargs)
     model_dict = model.state_dict()
 
     pretrained_dict = model_zoo.load_url(model_urls['vgg19'])
