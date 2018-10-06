@@ -13,6 +13,7 @@ import os
 from model import VGG
 from model import cfg
 from model import model_urls
+from utils import postprocess, preprocess
 
 
 class vgg_extractor(VGG):
@@ -34,40 +35,6 @@ class vgg_extractor(VGG):
             chosen_features.append(curr_feat)
             indx = indx_
         return chosen_features
-
-
-def preprocess(fn, im_size=224):
-    im = Image.open(fn)
-    if isinstance(im_size, int):
-        height = width = im_size
-    elif isinstance(im_size, (tuple, list)) and len(im_size) == 2:
-        height = im_size[0]
-        width = im_size[1]
-    else:
-        raise ValueError('not an accepted dim!')
-    prep = transforms.Compose([transforms.Resize((height, width)),
-                               transforms.ToTensor(),
-                               transforms.Lambda(lambda x: x[torch.LongTensor([2, 1, 0])]),  # turn to BGR
-                               transforms.Normalize(mean=[0.40760392, 0.45795686, 0.48501961],  # subtract imagenet mean
-                                                    std=[1, 1, 1]),
-                               transforms.Lambda(lambda x: x.mul_(255)),
-                               ])
-    return prep(im)
-
-
-def postprocess(tensor):
-    postpa = transforms.Compose([transforms.Lambda(lambda x: x.mul_(1. / 255)),
-                                 transforms.Normalize(mean=[-0.40760392, -0.45795686, -0.48501961],  # add imagenet mean
-                                                      std=[1, 1, 1]),
-                                 transforms.Lambda(lambda x: x[torch.LongTensor([2, 1, 0])]),  # turn to RGB
-                                 ])
-    postpb = transforms.Compose([transforms.ToPILImage()])
-    t = postpa(tensor)
-    t[t > 1] = 1
-    t[t < 0] = 0
-    img = postpb(t)
-    return img
-
 
 def make_layers_avg(cfg, batch_norm=False):
     layers = []

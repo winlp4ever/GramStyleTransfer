@@ -17,6 +17,7 @@ import utils
 levels = [1, 6, 11, 20, 29]
 d_levels = [40, 33, 26, 13, 0]
 
+
 class unitransform(nn.Module):
     def __init__(self, cfg, dspl_cfg):
         super(unitransform, self).__init__()
@@ -54,7 +55,7 @@ def make_reversed_layers(cfg, batch_norm=False):
         if v == 'U':
             layers.append(nn.Upsample(scale_factor=2, mode='nearest'))
         else:
-            #dspl_conv = nn.ConvTranspose2d(in_channels, v, kernel_size=3, padding=0)
+            # dspl_conv = nn.ConvTranspose2d(in_channels, v, kernel_size=3, padding=0)
             dspl_conv = nn.Conv2d(in_channels, v, kernel_size=3, padding=0)
             if batch_norm:
                 layers += [nn.ReflectionPad2d(padding=1), dspl_conv, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
@@ -104,7 +105,7 @@ def load_checkpoint(model, ckpt_path, optimizer=None):
         model.load_state_dict(checkpoint['state_dict'])
         if optimizer is not None:
             optimizer.load_state_dict(checkpoint['optimizer'])
-        #scheduler.load_state_dict(checkpoint['scheduler'])
+        # scheduler.load_state_dict(checkpoint['scheduler'])
         print("=> loaded checkpoint '{}' (epoch {})"
               .format(path, checkpoint['epoch']))
         return checkpoint['epoch']
@@ -179,10 +180,11 @@ if __name__ == '__main__':
     prep = transforms.Compose([transforms.Resize((height, width)),
                                transforms.ToTensor(),
                                transforms.Lambda(lambda x: x[torch.LongTensor([2, 1, 0])]),  # turn to BGR
-                               transforms.Normalize(mean=[0.40760392, 0.45795686, 0.48501961],  # subtract imagenet mean
-                                                    std=[1, 1, 1]),
+                               #transforms.Normalize(mean=[0.40760392, 0.45795686, 0.48501961], std=[1, 1, 1]),
                                transforms.Lambda(lambda x: x.mul_(255)),
                                ])
+
+
 
     # load datasets
     train_dataset, test_dataset = map(lambda dir: datasets.ImageFolder(
@@ -203,11 +205,12 @@ if __name__ == '__main__':
     model = vgg19_autoencoder().to(device)
 
     optimizer = optim.Adam(model.dspl.parameters(), lr=args.lr)
+
+
     def lr_updater(optim_, ep_):
         for param_group in optim_.param_groups:
             param_group['lr'] *= 1 / (1 + args.gamma * ep_)
 
-    #scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=[lr_updater,])
 
     ckpt_path = os.path.join(args.ckpt_path, str(args.ckpt_level))
     if args.resume:

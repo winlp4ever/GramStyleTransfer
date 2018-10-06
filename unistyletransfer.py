@@ -8,9 +8,31 @@ import argparse
 import os
 from PIL import Image
 from torchvision import transforms
+import numpy as np
+from numpy.linalg import eigh
 
-from extract import preprocess, postprocess
+from utils import preprocess, postprocess
 from unitransform import vgg19_autoencoder, load_checkpoint
+
+
+def factorise(phi):
+    m = np.mean(phi)
+    phi_ = phi
+    u = np.dot(phi_, phi_.T) + 1e-12
+    w, v = eigh(u)
+    w = np.sqrt(w)
+    return m, w, v
+
+
+def matching(phic, phis, alpha=1.0):
+    mc, Dc, Ec = factorise(phic)
+    ms, Ds, Es = factorise(phis)
+
+    phic_ = np.dot(np.dot(Ec, np.diag(1 / Dc)), Ec.T)
+    phic_ = np.dot(phic_, phic)
+    phisc = np.dot(np.dot(Es, np.diag(Ds)), Es.T)
+    phisc = np.dot(phisc, phic_)
+    return alpha * phisc + (1 - alpha) * phic
 
 
 if __name__ == '__main__':
@@ -33,7 +55,7 @@ if __name__ == '__main__':
     else:
         raise ValueError('unaccepted value of im size!')
 
-    im = preprocess(os.path.join(args.src_path, args.filename + '.jpg'), im_size=(height, width))
+    im = preprocess(os.path.join(args.src_path, args.filename + '.jpg'), im_size=(height, width), subtract_mean=False)
     im = torch.unsqueeze(im, 0)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -44,10 +66,5 @@ if __name__ == '__main__':
     _, o_t = model.forward(im.to(device), decode=True, level=args.level)
     print(o_t.shape)
 
-    o_im = postprocess(o_t.cpu()[0])
+    o_im = postprocess(o_t.cpu()[0], substract_mean=False)
     o_im.show()
-
-
-
-
-
