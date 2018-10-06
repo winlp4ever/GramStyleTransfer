@@ -26,7 +26,11 @@ class unitransform(nn.Module):
         self._init_weights()
         self.writer = SummaryWriter()
 
-    def forward(self, x, decode=False, level=5):
+    def forward(self, x, decode=False, level=5, decode_fr_embed=False, embed_=None):
+        if decode_fr_embed:
+            assert embed_ is not None, 'embed must not be of NoneType!'
+            return self.dspl[d_levels[level]:](embed_)
+
         embed = self.features[:levels[level] + 1](x)
         if decode:
             output = self.dspl[d_levels[level]:](embed)

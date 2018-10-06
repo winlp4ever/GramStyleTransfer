@@ -17,7 +17,7 @@ from unitransform import vgg19_autoencoder, load_checkpoint
 
 def factorise(phi):
     m = np.mean(phi)
-    phi_ = phi
+    phi_ = phi - m
     u = np.dot(phi_, phi_.T) + 1e-12
     w, v = eigh(u)
     w = np.sqrt(w)
@@ -25,19 +25,20 @@ def factorise(phi):
 
 
 def matching(phic, phis, alpha=1.0):
-    mc, Dc, Ec = factorise(phic)
-    ms, Ds, Es = factorise(phis)
+    mc, Dc12, Ec = factorise(phic)
+    ms, Ds12, Es = factorise(phis)
 
-    phic_ = np.dot(np.dot(Ec, np.diag(1 / Dc)), Ec.T)
+    phic_ = np.dot(np.dot(Ec, np.diag(1 / Dc12)), Ec.T)
     phic_ = np.dot(phic_, phic)
-    phisc = np.dot(np.dot(Es, np.diag(Ds)), Es.T)
+    phisc = np.dot(np.dot(Es, np.diag(Ds12)), Es.T)
     phisc = np.dot(phisc, phic_)
-    return alpha * phisc + (1 - alpha) * phic
+    return alpha * phisc + (1 - alpha) * phic + ms
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--filename', '-f')
+    parser.add_argument('--style', '-s')
     parser.add_argument('--level', '-l', type=int, default=0)
     parser.add_argument('--ckpt-path', '-c', default='./uni/checkpoints')
     parser.add_argument('--src-path', default='./images')
@@ -55,16 +56,34 @@ if __name__ == '__main__':
     else:
         raise ValueError('unaccepted value of im size!')
 
-    im = preprocess(os.path.join(args.src_path, args.filename + '.jpg'), im_size=(height, width), subtract_mean=False)
-    im = torch.unsqueeze(im, 0)
-
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = vgg19_autoencoder().to(device)
 
     load_checkpoint(model, ckpt_path)
 
-    _, o_t = model.forward(im.to(device), decode=True, level=args.level)
-    print(o_t.shape)
+    def process_im(fp):
+        im = preprocess(fp, im_size=(height, width), subtract_mean=False)
+        im = torch.unsqueeze(im, 0)
+        embed = model.forward(im.to(device), decode=False, level=args.level)
+        return embed
 
+    em_c_ts = process_im(os.path.join(args.src_path, args.filename + '.jpg'))
+    em_s_ts = process_im(os.path.join(args.src_path, args.style + '.jpg'))
+
+    em_c = em_c_ts.cpu().detach().numpy()[0]
+    em_s = em_s_ts.cpu().detach().numpy()[0]
+
+    embed_shape = em_c.shape
+
+    em_c = np.reshape(em_c, newshape=(embed_shape[0], -1))
+    em_s = np.reshape(em_s, newshape=(embed_shape[0], -1))
+
+    em_cs = matching(em_c, em_s)
+    em_cs = np.reshape(em_cs, embed_shape)
+
+    em = torch.from_numpy(em_cs).to(device)
+    em = torch.unsqueeze(em, 0)
+
+    o_t = model.forward(x=None, decode_fr_embed=True, embed_=em, level=args.level)
     o_im = postprocess(o_t.cpu()[0], substract_mean=False)
     o_im.show()
