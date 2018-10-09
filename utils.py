@@ -3,6 +3,8 @@ from PIL import Image
 import torchvision
 from torchvision import transforms
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 def sec2time(secs):
     secs = int(secs)
@@ -52,6 +54,7 @@ def postprocess(tensor, substract_mean=True):
     t[t < 0] = 0
     img = postpb(t)
     return img
+
 
 if __name__ == '__main__':
     print(sec2time(4600))

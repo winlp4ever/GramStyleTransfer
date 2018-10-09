@@ -20,6 +20,7 @@ def factorise(phi):
     phi_ = phi - m
     u = np.dot(phi_, phi_.T) + 1e-12
     w, v = eigh(u)
+    w[w < 0] = 1e-6
     w = np.sqrt(w)
     return m, w, v
 
@@ -43,6 +44,7 @@ if __name__ == '__main__':
     parser.add_argument('--ckpt-path', '-c', default='./uni/checkpoints')
     parser.add_argument('--src-path', default='./images')
     parser.add_argument('--size', default=[224], nargs='*', type=int)
+    parser.add_argument('--alpha', default=1.0, type=float)
 
     args = parser.parse_args()
 
@@ -78,7 +80,7 @@ if __name__ == '__main__':
     em_c = np.reshape(em_c, newshape=(embed_shape[0], -1))
     em_s = np.reshape(em_s, newshape=(embed_shape[0], -1))
 
-    em_cs = matching(em_c, em_s)
+    em_cs = matching(em_c, em_s, alpha=args.alpha)
     em_cs = np.reshape(em_cs, embed_shape)
 
     em = torch.from_numpy(em_cs).to(device)

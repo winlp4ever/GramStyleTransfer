@@ -36,12 +36,15 @@ class vgg_extractor(VGG):
             indx = indx_
         return chosen_features
 
-def make_layers_avg(cfg, batch_norm=False):
+def make_layers(cfg, batch_norm=False, avg=False):
     layers = []
     in_channels = 3
     for v in cfg:
         if v == 'M':
-            layers += [nn.AvgPool2d(kernel_size=2, stride=2)]
+            if avg:
+                layers += [nn.AvgPool2d(kernel_size=2, stride=2)]
+            else:
+                layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
         else:
             conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
             if batch_norm:
@@ -55,7 +58,7 @@ def make_layers_avg(cfg, batch_norm=False):
 def vgg19_bn_extractor(**kwargs):
     kwargs['init_weights'] = False
 
-    model = vgg_extractor(make_layers_avg(cfg['E'], batch_norm=False), **kwargs)
+    model = vgg_extractor(make_layers(cfg['E'], batch_norm=False, avg=True), **kwargs)
     model_dict = model.state_dict()
 
     pretrained_dict = model_zoo.load_url(model_urls['vgg19'])

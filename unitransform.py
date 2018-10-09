@@ -5,7 +5,7 @@ from torchvision import datasets, transforms
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from extract import make_layers_avg
+from extract import make_layers
 import torch.utils.model_zoo as model_zoo
 from model import model_urls
 import os
@@ -14,14 +14,14 @@ from tensorboardX import SummaryWriter
 import time
 import utils
 
-levels = [1, 6, 11, 20, 29]
-d_levels = [40, 33, 26, 13, 0]
+levels = [1, 6, 11, 15, 20, 24, 29]
+d_levels = [40, 33, 26, 20, 13, 7, 0]
 
 
 class unitransform(nn.Module):
     def __init__(self, cfg, dspl_cfg):
         super(unitransform, self).__init__()
-        self.features = make_layers_avg(cfg, batch_norm=False)
+        self.features = make_layers(cfg, batch_norm=False)
         self.dspl = make_reversed_layers(dspl_cfg, batch_norm=False)
         self._init_weights()
         self.writer = SummaryWriter()
@@ -39,7 +39,7 @@ class unitransform(nn.Module):
 
     def _init_weights(self):
         for m in self.modules():
-            if isinstance(m, nn.ConvTranspose2d):
+            if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
@@ -123,6 +123,12 @@ def training(model, device, train_loader, optimizer, lambd, epoch, level):
     for param in model.features.parameters():
         param.requires_grad = False
 
+    if level > 0:
+        for lyr in model.dspl[d_levels[level - 1]:]:
+            if isinstance(lyr, nn.Conv2d):
+                lyr.weight.requires_grad = False
+                lyr.bias.requires_grad = False
+
     train_loss = 0
     begin = time.time()
     for batch_idx, (data, _) in enumerate(train_loader):
@@ -178,7 +184,7 @@ if __name__ == '__main__':
 
     use_cuda = True
 
-    height = width = 224
+    height = width = 256
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
     prep = transforms.Compose([transforms.Resize((height, width)),
@@ -202,13 +208,13 @@ if __name__ == '__main__':
 
     test_loader = torch.utils.data.DataLoader(
         test_dataset,
-        batch_size=args.batch_size, shuffle=True, **kwargs
+        batch_size=args.batch_size // 2, shuffle=True, **kwargs
     )
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = vgg19_autoencoder().to(device)
 
-    optimizer = optim.Adam(model.dspl.parameters(), lr=args.lr)
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.dspl.parameters()), lr=args.lr)
 
 
     def lr_updater(optim_, ep_):
@@ -218,9 +224,11 @@ if __name__ == '__main__':
 
     ckpt_path = os.path.join(args.ckpt_path, str(args.ckpt_level))
     if args.resume:
-        last_epoch = load_checkpoint(model, ckpt_path, optimizer)
         if args.ckpt_level < args.level:
             last_epoch = 0
+            load_checkpoint(model, ckpt_path)
+        else:
+            last_epoch = load_checkpoint(model, ckpt_path, optimizer)
     else:
         last_epoch = 0
 
@@ -232,6 +240,7 @@ if __name__ == '__main__':
                             'epoch': last_epoch + epoch,
                             'state_dict': model.state_dict(),
                             'optimizer': optimizer.state_dict(),
-                        }, epoch, args.level)
+                        }, epoch + last_epoch, args.level)
         lr_updater(optimizer, epoch + last_epoch)
-        testing(model, device, test_loader, epoch, args.level)
+        if epoch % 5 == 0:
+            testing(model, device, test_loader, epoch + last_epoch, args.level)
