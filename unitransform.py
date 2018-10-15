@@ -14,7 +14,7 @@ from tensorboardX import SummaryWriter
 import time
 import utils
 
-levels = [1, 6, 11, 15, 20, 24, 29]
+levels = [2, 9, 16, 29, 42]
 d_levels = [40, 33, 26, 20, 13, 7, 0]
 
 
@@ -67,6 +67,19 @@ def make_reversed_layers(cfg, batch_norm=False):
                 layers += [nn.ReflectionPad2d(padding=1), dspl_conv, nn.ReLU(inplace=True)]
             in_channels = v
     return nn.Sequential(*layers)
+
+
+def _to_reflective_padding(model):
+    new_features = []
+    for lyr in model.features:
+        if isinstance(lyr, nn.Conv2d):
+            conv_ = nn.Conv2d(lyr.in_channels, lyr.out_channels, padding=0, kernel_size=3)
+            conv_.weight = nn.Parameter(lyr.weight.float())
+            conv_.bias = nn.Parameter(lyr.bias.float())
+            new_features += [nn.ReflectionPad2d(1), conv_]
+        else:
+            new_features += [lyr]
+    model.features = nn.Sequential(*new_features)
 
 
 def vgg19_autoencoder():
@@ -212,7 +225,9 @@ if __name__ == '__main__':
     )
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = vgg19_autoencoder().to(device)
+    model = vgg19_autoencoder()
+    _to_reflective_padding(model)
+    model = model.to(device)
 
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.dspl.parameters()), lr=args.lr)
 

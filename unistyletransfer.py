@@ -12,7 +12,7 @@ import numpy as np
 from numpy.linalg import eigh
 
 from utils import preprocess, postprocess
-from unitransform import vgg19_autoencoder, load_checkpoint
+from unitransform import vgg19_autoencoder, load_checkpoint, _to_reflective_padding
 
 
 def factorise(phi):
@@ -59,7 +59,9 @@ if __name__ == '__main__':
         raise ValueError('unaccepted value of im size!')
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = vgg19_autoencoder().to(device)
+    model = vgg19_autoencoder()
+    _to_reflective_padding(model)
+    model = model.to(device)
 
     load_checkpoint(model, ckpt_path)
 
