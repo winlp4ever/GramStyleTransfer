@@ -14,8 +14,8 @@ from tensorboardX import SummaryWriter
 import time
 import utils
 
-levels = [2, 9, 16, 29, 42]
-d_levels = [40, 33, 26, 20, 13, 7, 0]
+levels = [1, 6, 11, 20, 29]
+d_levels = [40, 33, 26, 13, 0]
 
 
 class unitransform(nn.Module):
@@ -70,6 +70,11 @@ def make_reversed_layers(cfg, batch_norm=False):
 
 
 def _to_reflective_padding(model):
+    """
+    Replace zero padding in model.features' layers by reflective padding
+    :param model: Model to change
+    :return:
+    """
     new_features = []
     for lyr in model.features:
         if isinstance(lyr, nn.Conv2d):
@@ -78,7 +83,7 @@ def _to_reflective_padding(model):
             conv_.bias = nn.Parameter(lyr.bias.float())
             new_features += [nn.ReflectionPad2d(1), conv_]
         else:
-            new_features += [lyr]
+            new_features += [lyr.copy()]
     model.features = nn.Sequential(*new_features)
 
 
@@ -131,12 +136,12 @@ def load_checkpoint(model, ckpt_path, optimizer=None):
         return 0
 
 
-def training(model, device, train_loader, optimizer, lambd, epoch, level):
+def training(model, device, train_loader, optimizer, lambd, epoch, level, fix=False):
     model.train()
     for param in model.features.parameters():
         param.requires_grad = False
 
-    if level > 0:
+    if level > 0 and fix:
         for lyr in model.dspl[d_levels[level - 1]:]:
             if isinstance(lyr, nn.Conv2d):
                 lyr.weight.requires_grad = False
@@ -181,15 +186,16 @@ def testing(model, device, test_loader, epoch, level):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--traindir', default='../datasets/coco/train')
-    parser.add_argument('--testdir', default='../datasets/coco/test')
+    parser.add_argument('--traindir', help='dir where locates training dataset', default='../datasets/coco/train')
+    parser.add_argument('--testdir', help='dir where locates testing dataset', default='../datasets/coco/test')
     parser.add_argument('--batch-size', type=int, default=8)
-    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--lr', help='initial learnning rate', type=float, default=1e-4)
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--lambd', type=float, default=1.0)
-    parser.add_argument('--ckpt-path', default='./uni/checkpoints')
-    parser.add_argument('--resume', type=bool, default=False, const=True, nargs='?')
-    parser.add_argument('--gamma', type=float, default=5e-5)
+    parser.add_argument('--ckpt-path', help='path to the saved checkpoint' , default='./uni/checkpoints')
+    parser.add_argument('--resume', help='whether continue training or begin from scratch',
+                        type=bool, default=False, const=True, nargs='?')
+    parser.add_argument('--gamma', help='const helps updating learning rate', type=float, default=5e-5)
     parser.add_argument('--level', type=int, default=4)
     parser.add_argument('--ckpt-level', type=int, default=4)
 
@@ -225,14 +231,19 @@ if __name__ == '__main__':
     )
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = vgg19_autoencoder()
-    _to_reflective_padding(model)
-    model = model.to(device)
+    model = vgg19_autoencoder().to(device)
 
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.dspl.parameters()), lr=args.lr)
 
 
     def lr_updater(optim_, ep_):
+        """
+        Update learning rate in optimizer object:
+        $$lr = lr * 1 / (1 + gamma * epoch)$$
+        :param optim_: pytorch optimizer object that contains learning rate attribute
+        :param ep_: current epoch
+        :return:
+        """
         for param_group in optim_.param_groups:
             param_group['lr'] *= 1 / (1 + args.gamma * ep_)
 
@@ -249,7 +260,8 @@ if __name__ == '__main__':
 
     for epoch in range(1, args.epochs + 1):
         print('\ncurr learning rate: {0:.6f}'.format(optimizer.param_groups[0]['lr']))
-        training(model, device, train_loader, optimizer, lambd=args.lambd, epoch=epoch + last_epoch, level=args.level)
+        training(model, device, train_loader, optimizer, lambd=args.lambd,
+                 epoch=epoch + last_epoch, level=args.level, fix=False if epoch + last_epoch > 25 else True)
         save_checkpoint(args,
                         {
                             'epoch': last_epoch + epoch,
@@ -257,5 +269,5 @@ if __name__ == '__main__':
                             'optimizer': optimizer.state_dict(),
                         }, epoch + last_epoch, args.level)
         lr_updater(optimizer, epoch + last_epoch)
-        if epoch % 5 == 0:
+        if (epoch + last_epoch) % 5 == 0:
             testing(model, device, test_loader, epoch + last_epoch, args.level)
