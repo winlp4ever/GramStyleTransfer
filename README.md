@@ -34,7 +34,7 @@ python extract.py -c girl -s stl --size 600 800 --lambd 0.5
 <img src="./results/girl2stl_lambd0.5_epochs10.jpg" width="400">
 
 
-Here are some results:
+Here are some other results:
 
 <img src="./results/cnt2vangogh_lambd0.03_epochs50.jpg" width="400">
 
@@ -42,8 +42,6 @@ Here are some results:
 
 compared to original pictures:
 
-<img src="./images/cnt.jpg" width="400" alt="content">
-<img src="./images/vangogh.jpg" width="400" alt="style">
+<img src="./images/cnt.jpg" width="300" alt="content"><img src="./images/vangogh.jpg" width="300" alt="style">
 
-<img src="./images/landscape.jpg" width="400" alt="content">
-<img src="./images/stl.jpg" width="400" alt="style">
+<img src="./images/landscape.jpg" width="300" alt="content"><img src="./images/stl.jpg" width="300" alt="style">
