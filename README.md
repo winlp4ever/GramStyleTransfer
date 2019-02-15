@@ -15,18 +15,35 @@ the network, the image should be:
 The _postprocess_ should be a complete inverse of the preprocess above.
 
 ##### Original Gatys' method
+
 You can try the following command:
 ```bash
-python extract.py -c landscape -s <image-filename> --size <height> <width> --lambd 0
+python extract.py -c <content-img-fn> -s <style-img-fn> --size <height> <width> --lambd 0.5
 ```
+
+All images should be located in `./images/` and with format `.jpg`
+
+For example, you can try the following command
+
+```bash
+python extract.py -c girl -s stl --size 600 800 --lambd 0.5
+```
+
+, expectedly it will produce
+
+<img src="./results/girl2stl_lambd0.5_epochs10.jpg" width="400">
+
 
 Here are some results:
 
-![](./results/cnt2vangogh_lambd0.03_epochs50.jpg)
+<img src="./results/cnt2vangogh_lambd0.03_epochs50.jpg" width="400">
 
-![](./results/img.jpg)
+<img src="results/landscape2stl_lambd0.1_epochs10.jpg" width="400">
 
 compared to original pictures:
-![](./images/cnt.jpg)
 
-![](./images/landscape.jpg)
+<img src="./images/cnt.jpg" width="400" alt="content">
+<img src="./images/vangogh.jpg" width="400" alt="style">
+
+<img src="./images/landscape.jpg" width="400" alt="content">
+<img src="./images/stl.jpg" width="400" alt="style">
