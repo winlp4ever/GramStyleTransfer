@@ -29,7 +29,8 @@ def preprocess(fn, im_size=224, subtract_mean=True):
                      transforms.Lambda(lambda x: x[torch.LongTensor([2, 1, 0])]),  # turn to BGR
                      transforms.Normalize(mean=[0.40760392, 0.45795686, 0.48501961],  # subtract imagenet mean
                                           std=[1, 1, 1]),
-                     transforms.Lambda(lambda x: x.mul_(255)),]
+                     transforms.Lambda(lambda x: x.mul_(255)),
+                    ]
 
     if not subtract_mean:
         del ls_transforms[3]

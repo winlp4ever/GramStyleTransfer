@@ -14,13 +14,15 @@ from tensorboardX import SummaryWriter
 import time
 import utils
 
-levels = [1, 6, 11, 20, 29]
+#levels = [1, 6, 11, 20, 29]
+levels = [2, 9, 16, 29, 42]
 d_levels = [40, 33, 26, 13, 0]
 
 
 class unitransform(nn.Module):
     def __init__(self, cfg, dspl_cfg):
         super(unitransform, self).__init__()
+        self.slf_prep = nn.Conv2d(3, 3, 1, 1, 0)
         self.features = make_layers(cfg, batch_norm=False)
         self.dspl = make_reversed_layers(dspl_cfg, batch_norm=False)
         self._init_weights()
@@ -31,7 +33,8 @@ class unitransform(nn.Module):
             assert embed_ is not None, 'embed must not be of NoneType!'
             return self.dspl[d_levels[level]:](embed_)
 
-        embed = self.features[:levels[level] + 1](x)
+        u = self.slf_prep(x)
+        embed = self.features[:levels[level] + 1](u)
         if decode:
             output = self.dspl[d_levels[level]:](embed)
             return embed, output
@@ -83,7 +86,7 @@ def _to_reflective_padding(model):
             conv_.bias = nn.Parameter(lyr.bias.float())
             new_features += [nn.ReflectionPad2d(1), conv_]
         else:
-            new_features += [lyr.copy()]
+            new_features += [lyr]
     model.features = nn.Sequential(*new_features)
 
 
@@ -203,13 +206,13 @@ if __name__ == '__main__':
 
     use_cuda = True
 
-    height = width = 256
+    height = width = 224
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
     prep = transforms.Compose([transforms.Resize((height, width)),
                                transforms.ToTensor(),
                                transforms.Lambda(lambda x: x[torch.LongTensor([2, 1, 0])]),  # turn to BGR
-                               #transforms.Normalize(mean=[0.40760392, 0.45795686, 0.48501961], std=[1, 1, 1]),
+                               transforms.Normalize(mean=[0.40760392, 0.45795686, 0.48501961], std=[1, 1, 1]),
                                transforms.Lambda(lambda x: x.mul_(255)),
                                ])
 
@@ -231,7 +234,10 @@ if __name__ == '__main__':
     )
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = vgg19_autoencoder().to(device)
+    model = vgg19_autoencoder()
+    _to_reflective_padding(model)
+    model = model.to(device)
+    #print(model.dspl)
 
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.dspl.parameters()), lr=args.lr)
 
@@ -250,18 +256,20 @@ if __name__ == '__main__':
 
     ckpt_path = os.path.join(args.ckpt_path, str(args.ckpt_level))
     if args.resume:
+        fix = True
         if args.ckpt_level < args.level:
             last_epoch = 0
             load_checkpoint(model, ckpt_path)
         else:
             last_epoch = load_checkpoint(model, ckpt_path, optimizer)
     else:
+        fix = False
         last_epoch = 0
 
     for epoch in range(1, args.epochs + 1):
         print('\ncurr learning rate: {0:.6f}'.format(optimizer.param_groups[0]['lr']))
         training(model, device, train_loader, optimizer, lambd=args.lambd,
-                 epoch=epoch + last_epoch, level=args.level, fix=False if epoch + last_epoch > 25 else True)
+                 epoch=epoch + last_epoch, level=args.level, fix=False)
         save_checkpoint(args,
                         {
                             'epoch': last_epoch + epoch,

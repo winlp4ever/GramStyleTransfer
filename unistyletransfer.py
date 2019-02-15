@@ -60,7 +60,7 @@ if __name__ == '__main__':
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = vgg19_autoencoder()
-    #_to_reflective_padding(model)
+    _to_reflective_padding(model)
     model = model.to(device)
 
     load_checkpoint(model, ckpt_path)
