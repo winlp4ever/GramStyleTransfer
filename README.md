@@ -22,9 +22,11 @@ python extract.py -c landscape -s <image-filename> --size <height> <width> --lam
 
 Here are some results:
 
-![](./results/cnt2vangogh_lambd0.03_epochs50.jpg =400x)
-![](./results/img.jpg =400x)
+![](./results/cnt2vangogh_lambd0.03_epochs50.jpg)
+
+![](./results/img.jpg)
 
 compared to original pictures:
-![](./images/cnt.jpg =400x)
-![](./images/landscape.jpg =400x)
+![](./images/cnt.jpg)
+
+![](./images/landscape.jpg)
